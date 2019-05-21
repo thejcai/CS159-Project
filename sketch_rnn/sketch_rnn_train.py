@@ -12,8 +12,11 @@ import os
 import time
 import zipfile
 
-from magenta.models.sketch_rnn import model as sketch_rnn_model
+# Gotta change these.
+# from magenta.models.sketch_rnn import model as sketch_rnn_model
 from magenta.models.sketch_rnn import utils
+import model as sketch_rnn_model
+
 import numpy as np
 import requests
 import six

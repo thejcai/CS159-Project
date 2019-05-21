@@ -9,6 +9,7 @@ from __future__ import print_function
 
 import random
 
+# Gotta change this.
 from magenta.models.sketch_rnn import rnn
 import numpy as np
 import tensorflow as tf
@@ -108,7 +109,8 @@ class Model(object):
         weight_start=0.001)
     lamb = rnn.super_linear(
         last_h,
-        self.hps.num_flows * (self.hps.z_size * 2 + 1),
+        # self.hps.num_flows * (self.hps.z_size * 2 + 1),
+        (self.hps.z_size * 2 + 1),
         input_size=self.hps.enc_rnn_size * 2,  # bi-dir, so x2
         scope='ENC_RNN_lambda',
         init_w='gaussian',
