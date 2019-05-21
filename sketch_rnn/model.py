@@ -27,9 +27,9 @@ def get_default_hparams():
       save_every=500,  # Number of batches per checkpoint creation.
       max_seq_len=250,  # Not used. Will be changed by model. [Eliminate?]
       dec_rnn_size=512,  # Size of decoder.
-      dec_model='lstm',  # Decoder: lstm, layer_norm or hyper.
+      dec_model='layer_norm',  # Decoder: lstm, layer_norm or hyper.
       enc_rnn_size=256,  # Size of encoder.
-      enc_model='lstm',  # Encoder: lstm, layer_norm or hyper.
+      enc_model='layer_norm',  # Encoder: lstm, layer_norm or hyper.
       z_size=128,  # Size of latent vector z. Recommend 32, 64 or 128.
       kl_weight=0.5,  # KL weight of loss equation. Recommend 0.5 or 1.0.
       kl_weight_start=0.01,  # KL start weight when annealing.
@@ -50,7 +50,8 @@ def get_default_hparams():
       random_scale_factor=0.15,  # Random scaling data augmentation proportion.
       augment_stroke_prob=0.10,  # Point dropping augmentation proportion.
       conditional=True,  # When False, use unconditional decoder-only model.
-      is_training=True  # Is model training? Recommend keeping true.
+      is_training=True,  # Is model training? Recommend keeping true.
+      num_flows=1 # The number of flows for our model.
   )
   return hparams
 
@@ -105,7 +106,14 @@ class Model(object):
         scope='ENC_RNN_sigma',
         init_w='gaussian',
         weight_start=0.001)
-    return mu, presig
+    lamb = rnn.super_linear(
+        last_h,
+        self.hps.num_flows * (self.hps.z_size * 2 + 1),
+        input_size=self.hps.enc_rnn_size * 2,  # bi-dir, so x2
+        scope='ENC_RNN_lambda',
+        init_w='gaussian',
+        weight_start=0.001)
+    return mu, presig, lamb
 
   def build_model(self, hps):
     """Define model architecture."""
@@ -189,7 +197,7 @@ class Model(object):
 
     # either do vae-bit and get z, or do unconditional, decoder-only
     if hps.conditional:  # vae mode:
-      self.mean, self.presig = self.encoder(self.output_x,
+      self.mean, self.presig, self.lamb = self.encoder(self.output_x,
                                             self.sequence_lengths)
       self.sigma = tf.exp(self.presig / 2.0)  # sigma > 0. div 2.0 -> sqrt.
       eps = tf.random_normal(
