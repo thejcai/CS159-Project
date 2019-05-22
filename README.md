@@ -8,6 +8,8 @@ From the deployment manager, once the VM has been deployed open the Jupyter note
 
 Verify the hyperparameters in the sketch_rnn_train.ipynb file are what you want. In between runs, you have to restart the kernel. 
 
+You will also want to check the tf.app.flags.DEFINE_string fields at the top of the notebook - make sure these properly specify where you want the log files saved, and whether you are resuming training. 
+
 We will use the following hyperparameters:
 
   num_steps = 25000
