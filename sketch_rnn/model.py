@@ -24,7 +24,7 @@ def get_default_hparams():
   """Return default HParams for sketch-rnn."""
   hparams = tf.contrib.training.HParams(
       data_set=['aaron_sheep.npz'],  # Our dataset.
-      num_steps=15000,  # Total number of steps of training. Keep large.
+      num_steps=25000,  # Total number of steps of training. Keep large.
       save_every=500,  # Number of batches per checkpoint creation.
       max_seq_len=250,  # Not used. Will be changed by model. [Eliminate?]
       dec_rnn_size=512,  # Size of decoder.
@@ -32,7 +32,7 @@ def get_default_hparams():
       enc_rnn_size=256,  # Size of encoder.
       enc_model='layer_norm',  # Encoder: lstm, layer_norm or hyper.
       z_size=128,  # Size of latent vector z. Recommend 32, 64 or 128.
-      kl_weight=0.5,  # KL weight of loss equation. Recommend 0.5 or 1.0.
+      kl_weight=0.25,  # KL weight of loss equation. Recommend 0.5 or 1.0.
       kl_weight_start=0.01,  # KL start weight when annealing.
       kl_tolerance=0.2,  # Level of KL loss at which to stop optimizing for KL.
       batch_size=100,  # Minibatch size. Recommend leaving at 100.
