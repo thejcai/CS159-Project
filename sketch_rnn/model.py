@@ -9,7 +9,8 @@ from __future__ import print_function
 
 import random
 
-from magenta.models.sketch_rnn import rnn
+# from magenta.models.sketch_rnn import rnn
+import rnn
 import numpy as np
 import tensorflow as tf
 
@@ -23,13 +24,13 @@ def get_default_hparams():
   """Return default HParams for sketch-rnn."""
   hparams = tf.contrib.training.HParams(
       data_set=['aaron_sheep.npz'],  # Our dataset.
-      num_steps=10000000,  # Total number of steps of training. Keep large.
+      num_steps=15000,  # Total number of steps of training. Keep large.
       save_every=500,  # Number of batches per checkpoint creation.
       max_seq_len=250,  # Not used. Will be changed by model. [Eliminate?]
       dec_rnn_size=512,  # Size of decoder.
-      dec_model='lstm',  # Decoder: lstm, layer_norm or hyper.
+      dec_model='layer_norm',  # Decoder: lstm, layer_norm or hyper.
       enc_rnn_size=256,  # Size of encoder.
-      enc_model='lstm',  # Encoder: lstm, layer_norm or hyper.
+      enc_model='layer_norm',  # Encoder: lstm, layer_norm or hyper.
       z_size=128,  # Size of latent vector z. Recommend 32, 64 or 128.
       kl_weight=0.5,  # KL weight of loss equation. Recommend 0.5 or 1.0.
       kl_weight_start=0.01,  # KL start weight when annealing.
@@ -50,7 +51,8 @@ def get_default_hparams():
       random_scale_factor=0.15,  # Random scaling data augmentation proportion.
       augment_stroke_prob=0.10,  # Point dropping augmentation proportion.
       conditional=True,  # When False, use unconditional decoder-only model.
-      is_training=True  # Is model training? Recommend keeping true.
+      is_training=True,  # Is model training? Recommend keeping true.
+      num_flows=1  # The length of the normalizing flow
   )
   return hparams
 
@@ -105,7 +107,58 @@ class Model(object):
         scope='ENC_RNN_sigma',
         init_w='gaussian',
         weight_start=0.001)
-    return mu, presig
+
+    # Will most likely have to change the size. Maybe create an array of the
+    # super linear terms? But either way will have to separate into u, b, w.
+    u_array = []
+    w_array = []
+    b_array = []
+    for i in range(self.hps.num_flows):
+      u = rnn.super_linear(
+          last_h,
+          # self.hps.num_flows * (self.hps.z_size * 2 + 1),
+          (self.hps.z_size),
+          input_size=self.hps.enc_rnn_size * 2,  # bi-dir, so x2
+          scope='ENC_RNN_u_' + str(i),
+          init_w='gaussian',
+          weight_start=0.001)
+      u_array.append(u)
+      w = rnn.super_linear(
+          last_h,
+          # self.hps.num_flows * (self.hps.z_size * 2 + 1),
+          (self.hps.z_size),
+          input_size=self.hps.enc_rnn_size * 2,  # bi-dir, so x2
+          scope='ENC_RNN_w_' + str(i),
+          init_w='gaussian',
+          weight_start=0.001)
+      w_array.append(w)
+      b = rnn.super_linear(
+          last_h,
+          # self.hps.num_flows * (self.hps.z_size * 2 + 1),
+          1,
+          input_size=self.hps.enc_rnn_size * 2,  # bi-dir, so x2
+          scope='ENC_RNN_b_' + str(i),
+          init_w='gaussian',
+          weight_start=0.001)
+      b_array.append(b)
+
+    return mu, presig, u_array, w_array, b_array
+
+
+  def planar_flow(self, z_prev, w, u, b): 
+    ''' 
+      NEW METHOD: Defines a planar flow with parameters w, u, b 
+      If z is a vector of dimension D, 
+      w - is vector of dimension D 
+      u - is vector of dimension D 
+      b - is real number. 
+    ''' 
+
+    # Create a nonlinearity function - this can be changed. 
+    h = lambda x: tf.tanh(x) 
+    z_hat = u * h(tf.expand_dims(tf.reduce_sum(z_prev * w, -1), -1) + b) 
+    return z_prev + z_hat
+
 
   def build_model(self, hps):
     """Define model architecture."""
@@ -189,15 +242,28 @@ class Model(object):
 
     # either do vae-bit and get z, or do unconditional, decoder-only
     if hps.conditional:  # vae mode:
-      self.mean, self.presig = self.encoder(self.output_x,
+      self.mean, self.presig, self.us, self.ws, self.bs = self.encoder(self.output_x,
                                             self.sequence_lengths)
       self.sigma = tf.exp(self.presig / 2.0)  # sigma > 0. div 2.0 -> sqrt.
       eps = tf.random_normal(
           (self.hps.batch_size, self.hps.z_size), 0.0, 1.0, dtype=tf.float32)
       self.batch_z = self.mean + tf.multiply(self.sigma, eps)
+
+      # Apply normalizing flow
+      self.sum_log_det_jacobian = 0.
+      h_prime = lambda x: 1 - tf.tanh(x) ** 2  # Derivative of nonlinearity h above
+
+      for i in range(self.hps.num_flows):
+        psi = h_prime(tf.expand_dims(tf.reduce_sum(
+          self.batch_z * self.ws[i], -1), -1) + self.bs[i]) * self.ws[i]
+        self.sum_log_det_jacobian += tf.log(tf.abs(1 + tf.reduce_sum(psi * self.us[i], -1)))
+
+        self.batch_z = self.planar_flow(self.batch_z, self.ws[i], self.us[i], self.bs[i])
+
       # KL cost
       self.kl_cost = -0.5 * tf.reduce_mean(
           (1 + self.presig - tf.square(self.mean) - tf.exp(self.presig)))
+      self.kl_cost -= tf.reduce_mean(self.sum_log_det_jacobian)
       self.kl_cost = tf.maximum(self.kl_cost, self.hps.kl_tolerance)
       pre_tile_y = tf.reshape(self.batch_z,
                               [self.hps.batch_size, 1, self.hps.z_size])
